@@ -13,8 +13,12 @@
 # limitations under the License.
 
 load(
-    "@bazel_tools//tools/cpp:unix_cc_toolchain_config.bzl",
+    "@rules_cc//cc/private/toolchain:unix_cc_toolchain_config.bzl", 
     unix_cc_toolchain_config = "cc_toolchain_config",
+)
+load(
+    ":windows_cc_toolchain_config.bzl",
+    windows_cc_toolchain_config = "cc_toolchain_config",
 )
 load(
     "//toolchain/internal:common.bzl",
@@ -129,6 +133,14 @@ def cc_toolchain_config(
             "unknown",
             "unknown",
         ),
+        "windows-msvc-x86_64": (
+            "clang-x86_64-windows-msvc",
+            "x64_windows",
+            "msvc",
+            "clang-cl",
+            "clang-cl",
+            "msvc",
+        ),
     }[target_os_arch_key]
 
     # Unfiltered compiler flags; these are placed at the end of the command
@@ -151,14 +163,21 @@ def cc_toolchain_config(
         "--target=" + target_system_name,
         # Security
         "-U_FORTIFY_SOURCE",  # https://github.com/google/sanitizers/issues/247
-        "-fstack-protector",
-        "-fno-omit-frame-pointer",
         # Diagnostics
         "-fcolor-diagnostics",
         "-Wall",
         "-Wthread-safety",
         "-Wself-assign",
     ]
+
+    sysroot_path = compiler_configuration["sysroot_path"]
+    if target_os != "windows-msvc":
+        # These are not supported by clang-cl.
+        # TODO (benmor01): Should we be using an equivalent /-style flag?
+        compile_flags.extend([
+            "-fstack-protector",
+            "-fno-omit-frame-pointer",
+        ])
 
     dbg_compile_flags = ["-g", "-fstandalone-debug"]
 
@@ -214,6 +233,26 @@ def cc_toolchain_config(
         # lld is invoked as wasm-ld for WebAssembly targets.
         use_lld = True
         use_libtool = False
+    elif target_os == "windows-msvc":
+        compile_flags.extend([
+            "/MT",
+            "/Brepro",
+            "/clang:-isystem{}/VC/Tools/MSVC/14.43.17.13/include".format(sysroot_path),
+            "/clang:-isystem{}/Windows_Kits/10/include/10.0.26100/um".format(sysroot_path),
+            "/clang:-isystem{}/Windows_Kits/10/include/10.0.26100/shared".format(sysroot_path),
+            "/clang:-isystem{}/Windows_Kits/10/include/10.0.26100/ucrt".format(sysroot_path),
+            "-no-canonical-prefixes",
+            "-Wno-builtin-macro-redefined",
+            "/clang:-fdebug-prefix-map={}=__bazel_toolchain_llvm_repo__/".format(toolchain_path_prefix),
+        ])
+        use_lld = True
+        link_flags.extend([
+            "-fuse-ld=lld",
+            "/clang:-Wl,/libpath:{}/Windows_Kits/10/lib/10.0.26100/ucrt/x64".format(sysroot_path),
+            "/clang:-Wl,/libpath:{}/Windows_Kits/10/lib/10.0.26100/um/x64".format(sysroot_path),
+            "/clang:-Wl,/libpath:{}/VC/Tools/MSVC/14.43.17.13/lib/x64".format(sysroot_path),
+        ])
+        use_libtool = False
     else:
         # Note that for xcompiling from darwin to linux, the native ld64 is
         # not an option because it is not a cross-linker, so lld is the
@@ -232,7 +271,6 @@ def cc_toolchain_config(
     # always link C++ libraries.
     cxx_standard = compiler_configuration["cxx_standard"]
     conly_flags = compiler_configuration["conly_flags"]
-    sysroot_path = compiler_configuration["sysroot_path"]
     if stdlib == "builtin-libc++" and is_xcompile:
         stdlib = "stdc++"
     if stdlib == "builtin-libc++":
@@ -324,6 +362,14 @@ def cc_toolchain_config(
     else:
         fail("Unknown value passed for stdlib: {stdlib}".format(stdlib = stdlib))
 
+    # If we are building for Windows, ignore everything we just did and overwrite.
+    if target_os == "windows-msvc":
+        cxx_flags = [
+            "/std:" + cxx_standard,
+            "-fms-compatibility",
+            "-fms-extensions",
+        ]
+
     opt_link_flags = ["-Wl,--gc-sections"] if target_os == "linux" else []
 
     # Coverage flags:
@@ -345,7 +391,7 @@ def cc_toolchain_config(
         "ar": tools_path_prefix + ("llvm-ar" if not use_libtool else "libtool"),
         "cpp": tools_path_prefix + "clang-cpp",
         "dwp": tools_path_prefix + "llvm-dwp",
-        "gcc": wrapper_bin_prefix + "cc_wrapper.sh",
+        "gcc": wrapper_bin_prefix + ("cc_wrapper_msvc.sh" if target_os == "windows-msvc" else "cc_wrapper.sh"),
         "gcov": tools_path_prefix + "llvm-profdata",
         "ld": tools_path_prefix + "ld.lld" if use_lld else "/usr/bin/ld",
         "llvm-cov": tools_path_prefix + "llvm-cov",
@@ -388,32 +434,56 @@ def cc_toolchain_config(
     if compiler_configuration["unfiltered_compile_flags"] != None:
         unfiltered_compile_flags = _fmt_flags(compiler_configuration["unfiltered_compile_flags"], toolchain_path_prefix)
 
-    # Source: https://cs.opensource.google/bazel/bazel/+/master:tools/cpp/unix_cc_toolchain_config.bzl
-    unix_cc_toolchain_config(
-        name = name,
-        cpu = target_cpu,
-        compiler = compiler,
-        toolchain_identifier = toolchain_identifier,
-        host_system_name = exec_arch,
-        target_system_name = target_system_name,
-        target_libc = target_libc,
-        abi_version = abi_version,
-        abi_libc_version = abi_libc_version,
-        cxx_builtin_include_directories = cxx_builtin_include_directories,
-        tool_paths = tool_paths,
-        compile_flags = compile_flags,
-        dbg_compile_flags = dbg_compile_flags,
-        opt_compile_flags = opt_compile_flags,
-        conly_flags = conly_flags,
-        cxx_flags = cxx_flags,
-        link_flags = link_flags + select({str(Label("@toolchains_llvm//toolchain/config:use_libunwind")): libunwind_link_flags, "//conditions:default": []}) +
-                     select({str(Label("@toolchains_llvm//toolchain/config:use_compiler_rt")): compiler_rt_link_flags, "//conditions:default": []}),
-        archive_flags = archive_flags,
-        link_libs = link_libs,
-        opt_link_flags = opt_link_flags,
-        unfiltered_compile_flags = unfiltered_compile_flags,
-        coverage_compile_flags = coverage_compile_flags,
-        coverage_link_flags = coverage_link_flags,
-        supports_start_end_lib = supports_start_end_lib,
-        builtin_sysroot = sysroot_path,
-    )
+    if target_os == "windows-msvc":
+        windows_cc_toolchain_config(
+            name = name,
+            cpu = target_cpu,
+            compiler = compiler,
+            toolchain_identifier = toolchain_identifier,
+            host_system_name = exec_arch,
+            target_system_name = target_system_name,
+            target_libc = target_libc,
+            abi_version = abi_version,
+            abi_libc_version = abi_libc_version,
+            cxx_builtin_include_directories = cxx_builtin_include_directories,
+            tool_paths = tool_paths,
+            archiver_flags = archive_flags,
+            default_compile_flags = compile_flags,
+            cxx_flags = cxx_flags,
+            default_link_flags = link_flags,
+            supports_parse_showincludes = False,
+            builtin_sysroot = sysroot_path,
+            msvc_cl_path = tools_path_prefix + "clang-cl",
+            msvc_ml_path = tools_path_prefix + "clang-cl",
+            msvc_link_path = tools_path_prefix + "lld-link",
+            msvc_lib_path = tools_path_prefix + "llvm-ar",
+        )
+    else:
+        unix_cc_toolchain_config(
+            name = name,
+            cpu = target_cpu,
+            compiler = compiler,
+            toolchain_identifier = toolchain_identifier,
+            host_system_name = exec_arch,
+            target_system_name = target_system_name,
+            target_libc = target_libc,
+            abi_version = abi_version,
+            abi_libc_version = abi_libc_version,
+            cxx_builtin_include_directories = cxx_builtin_include_directories,
+            tool_paths = tool_paths,
+            compile_flags = compile_flags,
+            dbg_compile_flags = dbg_compile_flags,
+            opt_compile_flags = opt_compile_flags,
+            conly_flags = conly_flags,
+            cxx_flags = cxx_flags,
+            link_flags = link_flags + select({str(Label("@toolchains_llvm//toolchain/config:use_libunwind")): libunwind_link_flags, "//conditions:default": []}) +
+                        select({str(Label("@toolchains_llvm//toolchain/config:use_compiler_rt")): compiler_rt_link_flags, "//conditions:default": []}),
+            archive_flags = archive_flags,
+            link_libs = link_libs,
+            opt_link_flags = opt_link_flags,
+            unfiltered_compile_flags = unfiltered_compile_flags,
+            coverage_compile_flags = coverage_compile_flags,
+            coverage_link_flags = coverage_link_flags,
+            supports_start_end_lib = supports_start_end_lib,
+            builtin_sysroot = sysroot_path,
+        )

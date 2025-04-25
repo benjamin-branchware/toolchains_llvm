@@ -42,7 +42,7 @@ trap cleanup EXIT
 # See note in toolchain/internal/configure.bzl where we define
 # `wrapper_bin_prefix` for why this wrapper is needed.
 
-if [[ -f %{toolchain_path_prefix}bin/clang ]]; then
+if [[ -f %{toolchain_path_prefix}bin/%{clang} ]]; then
   execroot_path=""
 elif [[ ${BASH_SOURCE[0]} == "/"* ]]; then
   # Some consumers of `CcToolchainConfigInfo` (e.g. `cmake` from rules_foreign_cc)
@@ -51,14 +51,14 @@ elif [[ ${BASH_SOURCE[0]} == "/"* ]]; then
   # This script is at _execroot_/external/_repo_name_/bin/cc_wrapper.sh
   execroot_path="${BASH_SOURCE[0]%/*/*/*/*}/"
 else
-  echo >&2 "ERROR: could not find clang; PWD=\"${PWD}\"; PATH=\"${PATH}\"."
+  echo >&2 "ERROR: could not find %{clang}; PWD=\"${PWD}\"; PATH=\"${PATH}\"."
   exit 5
 fi
 
 function sanitize_option() {
   local -r opt=$1
-  if [[ ${opt} == */cc_wrapper.sh ]]; then
-    printf "%s" "${execroot_path}%{toolchain_path_prefix}bin/clang"
+  if [[ ${opt} == */cc_wrapper.sh || ${opt} == */cc_wrapper_msvc.sh ]]; then
+    printf "%s" "${execroot_path}%{toolchain_path_prefix}bin/%{clang}"
   elif [[ ${opt} =~ ^-fsanitize-(ignore|black)list=[^/] ]]; then
     # shellcheck disable=SC2206
     parts=(${opt/=/ }) # Split flag name and value into array.

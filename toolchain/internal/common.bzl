@@ -22,6 +22,8 @@ SUPPORTED_TARGETS = [
     ("none", "wasm64"),
     ("wasip1", "wasm32"),
     ("wasip1", "wasm64"),
+    ("windows-msvc", "x86_64"),
+    ("windows-msvc", "aarch64"),
 ]
 
 # Map of tool name to its symlinked name in the tools directory.
@@ -30,15 +32,19 @@ _toolchain_tools = {
     name: name
     for name in [
         "clang-cpp",
+        "clang-cl",
         "clang-format",
         "clang-tidy",
         "clangd",
         "ld.lld",
+        "ld64.lld",
+        "lld-link",
         "llvm-ar",
         "llvm-dwp",
         "llvm-profdata",
         "llvm-cov",
         "llvm-nm",
+        "llvm-lib",
         "llvm-objcopy",
         "llvm-objdump",
         "llvm-strip",
@@ -135,7 +141,13 @@ def os_from_rctx(rctx):
 
 def os_bzl(os):
     # Return the OS string as used in bazel platform constraints.
-    return {"darwin": "osx", "linux": "linux", "none": "none", "wasip1": "wasi"}[os]
+    return {
+        "darwin": "osx", 
+        "linux": "linux", 
+        "none": "none", 
+        "wasip1": "wasi",
+        "windows-msvc": "windows",
+    }[os]
 
 def arch(rctx):
     arch = rctx.attr.exec_arch

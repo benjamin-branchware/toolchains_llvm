@@ -223,7 +223,16 @@ def llvm_config_impl(rctx):
         cc_wrapper_tpl,
         {
             "%{toolchain_path_prefix}": llvm_dist_path_prefix,
+            "%{clang}": "clang",
         },
+    )
+    rctx.template(
+        "bin/cc_wrapper_msvc.sh",
+        rctx.attr._cc_wrapper_sh_tpl,
+        {
+            "%{toolchain_path_prefix}": llvm_dist_path_prefix,
+            "%{clang}": "clang-cl",
+        }
     )
 
 def _cc_toolchains_str(
@@ -299,7 +308,7 @@ def _cc_toolchain_str(
     if not sysroot_path:
         if exec_os == target_os and exec_arch == target_arch:
             # For darwin -> darwin, we can use the macOS SDK path.
-            sysroot_path = _default_sysroot_path(rctx, exec_os)
+            sysroot_path = _default_sysroot_path(rctx, exec_os)    
         else:
             # We are trying to cross-compile without a sysroot, let's bail.
             # TODO: Are there situations where we can continue?
@@ -327,6 +336,7 @@ def _cc_toolchain_str(
         "wasm64": "wasm64-unknown-unknown",
         "wasip1-wasm32": "wasm32-wasip1",
         "wasip1-wasm64": "wasm64-wasip1",
+        "windows-msvc-x86_64": "x86_64-pc-windows-msvc",
     }[target_pair]
     cxx_builtin_include_directories = [
         toolchain_path_prefix + "include/c++/v1",
@@ -358,6 +368,9 @@ def _cc_toolchain_str(
             cxx_builtin_include_directories.extend([
                 _join(sysroot_prefix, "/include"),
             ])
+    elif target_os == "windows-msvc":
+        # No additional include directories for MSVC.
+        pass
     else:
         fail("Unreachable")
 

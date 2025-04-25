@@ -32,6 +32,7 @@ filegroup(
     srcs = [
         "bin/clang",
         "bin/clang++",
+        "bin/clang-cl",
         "bin/clang-cpp",
     ],
 )
@@ -42,6 +43,7 @@ filegroup(
         "bin/ld.lld",
         "bin/ld64.lld",
         "bin/wasm-ld",
+        "bin/lld-link",
     ],
 )
 
